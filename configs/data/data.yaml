@@ -1,12 +1,15 @@
 defaults:
-  - ./providers/default  # This will load the default provider
+  - ../providers/default
+  
+cache_dir: './data_cache'
+openbb_output_type: ${openbb.output_type}
 
 ticker: AAPL
-start_date: '2022-01-01'
-end_date: '2023-01-01'
+train_date: '2022-01-01'
+val_date: '2022-09-01'
+test_date: '2023-01-01'
 sequence_length: 10
 batch_size: 32
 market: US
 interval: '1d'
-cache_dir: './data_cache'
 use_cache: true

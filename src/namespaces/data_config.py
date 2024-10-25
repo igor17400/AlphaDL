@@ -3,8 +3,9 @@ from dataclasses import dataclass
 @dataclass
 class DataConfig:
     ticker: str
-    start_date: str
-    end_date: str
+    train_date: str
+    val_date: str
+    test_date: str
     sequence_length: int
     batch_size: int
     market: str
@@ -12,3 +13,4 @@ class DataConfig:
     cache_dir: str
     use_cache: bool
     provider: str
+    openbb_output_type: str

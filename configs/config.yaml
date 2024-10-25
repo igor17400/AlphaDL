@@ -1,6 +1,7 @@
 defaults:
   - data: data
-  - market: us_daily  # or whichever market file you want as default
+  - market: us_daily
+  - openbb: settings
   - _self_
 
 # Other configurations (model, training, etc.)
