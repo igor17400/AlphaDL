@@ -1,0 +1,6 @@
+model:
+  name: lstm
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  learning_rate: 0.001

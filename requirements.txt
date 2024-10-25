@@ -1,0 +1,5 @@
+wandb
+openbb
+lightning
+hydra-core
+pytest

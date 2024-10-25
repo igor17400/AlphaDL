@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Lightning logs
+lightning_logs/
+*.ckpt
+
+# Hydra
+outputs/
+multirun/
+
+# Weights & Biases
+wandb/
+
+# Dash
+*.dash
+
+# Data files
+*.csv
+*.json
+*.pkl
+*.h5
+
+# Joblib files
+*.joblib
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+ml_models/results.joblib
+ml_models/predictions.joblib
+visualization/assets/*.css
+
+# OpenBB (if it generates any specific files, add them here)
+
+# Add any other project-specific files or directories you want to ignore

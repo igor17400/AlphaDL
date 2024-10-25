@@ -1,0 +1,16 @@
+defaults:
+  - data: data
+  - market: us_daily  # or whichever market file you want as default
+  - _self_
+
+# Other configurations (model, training, etc.)
+project_name: AlphaDL
+seed: 42
+
+trainer:
+  max_epochs: 100
+  gpus: 1
+
+wandb:
+  project: ${project_name}
+  entity: your_wandb_username
