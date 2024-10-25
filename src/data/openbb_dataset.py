@@ -137,25 +137,3 @@ class OpenBBDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         logger.info("Creating test dataloader")
         return DataLoader(self.test_data, batch_size=self.batch_size)
-
-# Example usage (you might want to move this to a separate file or remove it if using Hydra)
-from src.namespaces.data_config import DataConfig
-
-config = DataConfig(
-    ticker='AAPL',
-    train_date='2022-01-01',
-    val_date='2022-09-01',
-    test_date='2023-01-01',
-    sequence_length=10,
-    batch_size=32,
-    market='US',
-    interval='1d',
-    cache_dir='./data_cache',
-    use_cache=True,
-    provider='yfinance',
-    openbb_output_type='dataframe'
-)
-
-data_module = OpenBBDataModule(config)
-data_module.prepare_data()
-data_module.setup()

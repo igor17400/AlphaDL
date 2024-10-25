@@ -3,9 +3,9 @@ import hydra
 from omegaconf import DictConfig
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
+import importlib
 
 from alphadl.data.openbb_dataset import OpenBBDataModule
-from alphadl.models import LSTM, XGBoost, CatBoost, MLP
 
 @hydra.main(config_path="../configs", config_name="config")
 def train(cfg: DictConfig):
@@ -14,17 +14,14 @@ def train(cfg: DictConfig):
     # Initialize data module
     data_module = OpenBBDataModule(cfg.data)
 
-    # Initialize model
-    if cfg.model.name == "lstm":
-        model = LSTM(cfg.model)
-    elif cfg.model.name == "xgboost":
-        model = XGBoost(cfg.model)
-    elif cfg.model.name == "catboost":
-        model = CatBoost(cfg.model)
-    elif cfg.model.name == "mlp":
-        model = MLP(cfg.model)
-    else:
-        raise ValueError(f"Unknown model: {cfg.model.name}")
+    # Dynamically import the model class
+    model_module = importlib.import_module(f"alphadl.models.{cfg.model.name}")
+    model_class = getattr(model_module, cfg.model.class_name)
+    model = model_class(**cfg.model.params)
+
+    # Dynamically import the loss function
+    loss_module = importlib.import_module(f"losses.{cfg.loss.name}")
+    loss_function = getattr(loss_module, cfg.loss.function_name)
 
     # Initialize WandB logger
     wandb_logger = WandbLogger(project=cfg.wandb.project, entity=cfg.wandb.entity)
@@ -38,6 +35,10 @@ def train(cfg: DictConfig):
 
     # Train the model
     trainer.fit(model, datamodule=data_module)
+
+    # Example of using the loss function
+    # Assuming you have prediction, ground_truth, base_price, mask, and batch_size available
+    # loss, reg_loss, rank_loss, return_ratio = loss_function(prediction, ground_truth, base_price, mask, batch_size, **cfg.loss.params)
 
     # Save the model
     trainer.save_checkpoint(f"{cfg.model.name}_model.ckpt")

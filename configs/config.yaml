@@ -4,14 +4,42 @@ defaults:
   - openbb: settings
   - _self_
 
-# Other configurations (model, training, etc.)
-project_name: AlphaDL
+# General configurations
+project_name: alphadl
 seed: 42
 
+# Trainer configurations
 trainer:
   max_epochs: 100
   gpus: 1
 
+# WandB configurations
 wandb:
   project: ${project_name}
-  entity: your_wandb_username
+
+# Data module configuration
+data:
+  module: openbb_dataset
+  class_name: OpenBBDataModule
+  params:
+    batch_size: 32
+    num_workers: 4
+    # Add other dataset-specific parameters here
+
+# Model configuration
+model:
+  name: stock_mixer
+  class_name: StockMixer
+  params:
+    stocks: 10
+    time_steps: 30
+    channels: 64
+    market: 20
+    scale: 1
+
+# Loss function configuration
+loss:
+  name: stock_loss
+  function_name: stock_mixer_loss
+  params:
+    alpha: 0.5
