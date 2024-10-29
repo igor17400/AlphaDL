@@ -1,0 +1,17 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - data: default.yaml
+  - model: default.yaml
+  - callbacks: default.yaml
+  - logger: many_loggers.yaml
+  - trainer: default.yaml
+  - paths: default.yaml
+  - extras: default.yaml
+  - hydra: default.yaml
+  - experiment: null
+
+task_name: "eval"
+tags: ["eval"]
+ckpt_path: null  # Specify the checkpoint path for evaluation
