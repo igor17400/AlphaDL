@@ -3,6 +3,7 @@ import sys
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
+import time
 
 import lightning as L
 from torch.utils.data import DataLoader, TensorDataset
@@ -111,9 +112,9 @@ class OpenBBDataModule(L.LightningDataModule):
             test_start_date, test_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.test_date)
 
             # Split the data
-            train_data = full_data[(full_data.index >= train_start_date) & (full_data.index <= train_end_date)]
-            val_data = full_data[(full_data.index >= val_start_date) & (full_data.index <= val_end_date)]
-            test_data = full_data[(full_data.index >= test_start_date) & (full_data.index <= test_end_date)]
+            train_data = full_data[(full_data.index >= train_start_date) & (full_data.index < train_end_date)]
+            val_data = full_data[(full_data.index >= val_start_date) & (full_data.index < val_end_date)]
+            test_data = full_data[(full_data.index >= test_start_date) & (full_data.index < test_end_date)]
 
             # Log the size of each dataset
             logger.info(f"Train data size: {train_data.shape}")
@@ -136,19 +137,60 @@ class OpenBBDataModule(L.LightningDataModule):
         Fetches historical data for the specified ticker symbol using OpenBB.
         """
         # Determine the overall start and end dates for fetching data
-        overall_start_date = self.train_date[0]
-        overall_end_date = self.test_date[1]
+        overall_start_date = datetime.strptime(self.train_date[0], "%Y-%m-%d")
+        overall_end_date = datetime.strptime("2024-11-07", "%Y-%m-%d")
 
-        logger.info(
-            f"Fetching data for {self.ticker} from {overall_start_date} to {overall_end_date}"
-        )
-        return obb.equity.price.historical(
-            symbol=self.ticker,
-            start_date=overall_start_date,
-            end_date=overall_end_date,
-            interval=self.interval,
-            provider=self.provider,
-        )
+        # Initialize an empty DataFrame to store the fetched data
+        all_data = pd.DataFrame()
+
+        # Set the initial start date for the first API call
+        current_start_date = overall_start_date
+
+        # Track the number of API calls
+        api_call_count = 0
+        api_call_limit = 300
+
+        while current_start_date < overall_end_date:
+            # Calculate the end date for the current window
+            current_end_date = current_start_date + pd.Timedelta(days=3)
+            if current_end_date > overall_end_date:
+                current_end_date = overall_end_date
+
+            # Convert dates to string format for the API call
+            start_str = current_start_date.strftime("%Y-%m-%d")
+            end_str = current_end_date.strftime("%Y-%m-%d")
+
+            logger.info(f"Fetching data for {self.ticker} from {start_str} to {end_str}")
+
+            # Fetch data for the current window
+            data_chunk = obb.equity.price.historical(
+                symbol=self.ticker,
+                start_date=start_str,
+                end_date=end_str,
+                interval=self.interval,
+                provider=self.provider,
+            )
+
+            # Append the fetched data to the all_data DataFrame
+            all_data = pd.concat([all_data, data_chunk])
+
+            # Update the start date for the next window
+            current_start_date = current_end_date
+
+            # Increment the API call count
+            api_call_count += 1
+
+            # Check if the API call limit is reached
+            if api_call_count >= api_call_limit:
+                logger.info("API call limit reached, waiting for 60 seconds...")
+                time.sleep(60)  # Wait for 60 seconds
+                api_call_count = 0  # Reset the API call count
+
+        # Log the fetched data to check its content
+        logger.info(f"Fetched data head:\n{all_data.head()}")
+        logger.info(f"Fetched data tail:\n{all_data.tail()}")
+
+        return all_data
 
     def setup(self, stage=None):
         logger.info("Setting up data sequences")
