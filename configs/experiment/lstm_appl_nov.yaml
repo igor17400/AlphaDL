@@ -1,0 +1,34 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=lstm_appl_nov
+
+defaults:
+  - override /data: us_minute.yaml
+  - override /model: lstm.yaml
+  - override /callbacks: default.yaml
+  - override /logger: many_loggers.yaml
+  - override /trainer: gpu.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["lstm", "appl", "high_freq", "mseloss", "nov"]
+
+seed: 42
+
+data:
+  ticker: "TSLA"
+
+callbacks:
+  early_stopping:
+    patience: 5
+
+trainer:
+  max_epochs: 20
+
+logger:
+  wandb:
+    name: "lstm_appl_nov"
+    tags: ${tags}
+    group: "apppl_nov"

@@ -1,6 +1,20 @@
-model:
-  name: lstm
-  hidden_size: 128
-  num_layers: 2
-  dropout: 0.2
-  learning_rate: 0.001
+_target_: src.models.forecast.lstm_module.LSTMForecastModule
+
+# training strategy
+loss: "mse_loss"
+
+# outputs
+outputs:
+  train: ["preds", "targets"]
+  val: ["preds", "targets"]
+  test: ["preds", "targets"]
+
+# evaluation
+save_recs: False
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.0001
+
+scheduler: null

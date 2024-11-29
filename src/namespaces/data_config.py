@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 @dataclass
-class DataConfig:
+class OpenBBDataConfig:
     ticker: str
     train_date: str
     val_date: str

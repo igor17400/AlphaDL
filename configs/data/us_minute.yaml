@@ -1,0 +1,20 @@
+_target_: src.data.openbb_datamodule.OpenBBDataModule
+
+# default parameters
+sequence_length: 30        # Default sequence length
+batch_size: 64             # Default batch size
+cache_dir: "./data"       # Default cache directory
+use_cache: true            # Default to using cache
+provider: "fmp"  # Default data provider
+openbb_output_type: "dataframe"  # Default output type
+
+
+# dataframe settings
+ticker: "AAPL"
+train_date: "2024-11-01"
+val_date: "2024-11-04"
+test_date: "2024-11-06"
+interval: "1m"
+market: "US"
+
+valid_time_split: "2024-11-04 00:00:00" # interactions with timestamp before this data will be used for training
