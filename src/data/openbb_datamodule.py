@@ -23,20 +23,19 @@ load_dotenv()
 # Access the API key
 openbb_api_key = os.getenv("OPENBB_API_KEY")
 
-# Set the API key for OpenBB
-obb.user.preferences.api_key = openbb_api_key
+# Login into OpenBB
+obb.account.login(pat=openbb_api_key)
 
 
 class OpenBBDataModule(L.LightningDataModule):
     def __init__(
         self,
         ticker: str,
-        train_date: str,
-        val_date: str,
-        test_date: str,
+        train_date: list,
+        val_date: list,
+        test_date: list,
         interval: str,
         market: str,
-        valid_time_split: str,
         sequence_length: int,
         batch_size: int,
         cache_dir: str,
@@ -50,12 +49,11 @@ class OpenBBDataModule(L.LightningDataModule):
 
         Parameters:
         - ticker (str): The stock ticker symbol to fetch data for.
-        - train_date (str): The start date for the training data in 'YYYY-MM-DD' format.
-        - val_date (str): The start date for the validation data in 'YYYY-MM-DD' format.
-        - test_date (str): The start date for the test data in 'YYYY-MM-DD' format.
+        - train_date (list): The start and end dates for the training data in 'YYYY-MM-DD' format.
+        - val_date (list): The start and end dates for the validation data in 'YYYY-MM-DD' format.
+        - test_date (list): The start and end dates for the test data in 'YYYY-MM-DD' format.
         - interval (str): The data interval (e.g., '1m' for 1 minute).
         - market (str): The market identifier (e.g., 'US' for the United States).
-        - valid_time_split (str): The datetime to split validation data.
         - sequence_length (int): The length of the sequence window for model input.
         - batch_size (int): The number of samples per batch for the DataLoader.
         - cache_dir (str): The directory to cache fetched data.
@@ -70,7 +68,6 @@ class OpenBBDataModule(L.LightningDataModule):
         self.test_date = test_date
         self.interval = interval
         self.market = market
-        self.valid_time_split = valid_time_split
         self.sequence_length = sequence_length
         self.batch_size = batch_size
         self.cache_dir = cache_dir
@@ -85,41 +82,70 @@ class OpenBBDataModule(L.LightningDataModule):
         """
         Prepares the data for the model by either loading it from a cache file or fetching it from OpenBB.
         """
-        # Define the path to the cache file
-        cache_file = os.path.join(
-            self.cache_dir, f"{self.ticker}_{self.market}_{self.interval}.csv"
-        )
-        logger.info(
-            f"Preparing data for {self.ticker} from {self.train_date} to {self.test_date}"
-        )
+        # Define the path to the cache directory
+        cache_dir = os.path.join(self.cache_dir, self.market, self.interval, self.ticker)
+        os.makedirs(cache_dir, exist_ok=True)  # Ensure the cache directory exists
 
-        # Check if the cache file exists and use it if available
-        if self.use_cache and os.path.exists(cache_file):
-            logger.info(f"Loading data from cache file: {cache_file}")
-            self.data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+        # Define paths for the train, val, and test CSV files
+        train_file = os.path.join(cache_dir, "train.csv")
+        val_file = os.path.join(cache_dir, "val.csv")
+        test_file = os.path.join(cache_dir, "test.csv")
+
+        # Check if the cache files exist and use them if available
+        if self.use_cache and all(os.path.exists(f) for f in [train_file, val_file, test_file]):
+            logger.info(f"Loading data from cache files in: {cache_dir}")
+            train_data = pd.read_csv(train_file, index_col=0, parse_dates=True)
+            val_data = pd.read_csv(val_file, index_col=0, parse_dates=True)
+            test_data = pd.read_csv(test_file, index_col=0, parse_dates=True)
         else:
-            # If cache file does not exist, fetch the data
+            # If cache files do not exist, fetch the data
             logger.info("Fetching data using OpenBB")
-            self.data = self._fetch_data()
+            full_data = self._fetch_data()
 
-            # Cache the fetched data
-            logger.info("Caching the data")
-            os.makedirs(
-                self.cache_dir, exist_ok=True
-            )  # Ensure the cache directory exists
-            self.data.to_csv(cache_file)  # Save the data to the cache file
+            # Log the range of the fetched data
+            logger.info(f"Fetched data from {full_data.index.min()} to {full_data.index.max()}")
+
+            # Convert date strings to datetime objects
+            train_start_date, train_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.train_date)
+            val_start_date, val_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.val_date)
+            test_start_date, test_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.test_date)
+
+            # Split the data
+            train_data = full_data[(full_data.index >= train_start_date) & (full_data.index <= train_end_date)]
+            val_data = full_data[(full_data.index >= val_start_date) & (full_data.index <= val_end_date)]
+            test_data = full_data[(full_data.index >= test_start_date) & (full_data.index <= test_end_date)]
+
+            # Log the size of each dataset
+            logger.info(f"Train data size: {train_data.shape}")
+            logger.info(f"Validation data size: {val_data.shape}")
+            logger.info(f"Test data size: {test_data.shape}")
+
+            # Cache the split data
+            logger.info("Caching the split data")
+            train_data.to_csv(train_file)
+            val_data.to_csv(val_file)
+            test_data.to_csv(test_file)
+
+        # Assign the data to the class attributes
+        self.train_data = train_data
+        self.val_data = val_data
+        self.test_data = test_data
 
     def _fetch_data(self):
         """
         Fetches historical data for the specified ticker symbol using OpenBB.
         """
+        # Determine the overall start and end dates for fetching data
+        overall_start_date = self.train_date[0]
+        overall_end_date = self.test_date[1]
+
         logger.info(
-            f"Fetching data for {self.ticker} from {self.train_date} to {self.test_date}"
+            f"Fetching data for {self.ticker} from {overall_start_date} to {overall_end_date}"
         )
         return obb.equity.price.historical(
             symbol=self.ticker,
-            start_date=self.train_date,
-            end_date=self.test_date,
+            start_date=overall_start_date,
+            end_date=overall_end_date,
             interval=self.interval,
             provider=self.provider,
         )

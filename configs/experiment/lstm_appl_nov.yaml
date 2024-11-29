@@ -18,7 +18,7 @@ tags: ["lstm", "appl", "high_freq", "mseloss", "nov"]
 seed: 42
 
 data:
-  ticker: "TSLA"
+  ticker: "AAPL"
 
 callbacks:
   early_stopping:

@@ -82,3 +82,4 @@ visualization/assets/*.css
 # OpenBB (if it generates any specific files, add them here)
 
 # Add any other project-specific files or directories you want to ignore
+logs/
