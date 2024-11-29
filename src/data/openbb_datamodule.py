@@ -84,7 +84,9 @@ class OpenBBDataModule(L.LightningDataModule):
         Prepares the data for the model by either loading it from a cache file or fetching it from OpenBB.
         """
         # Define the path to the cache directory
-        cache_dir = os.path.join(self.cache_dir, self.market, self.interval, self.ticker)
+        cache_dir = os.path.join(
+            self.cache_dir, self.market, self.interval, self.ticker
+        )
         os.makedirs(cache_dir, exist_ok=True)  # Ensure the cache directory exists
 
         # Define paths for the train, val, and test CSV files
@@ -93,7 +95,9 @@ class OpenBBDataModule(L.LightningDataModule):
         test_file = os.path.join(cache_dir, "test.csv")
 
         # Check if the cache files exist and use them if available
-        if self.use_cache and all(os.path.exists(f) for f in [train_file, val_file, test_file]):
+        if self.use_cache and all(
+            os.path.exists(f) for f in [train_file, val_file, test_file]
+        ):
             logger.info(f"Loading data from cache files in: {cache_dir}")
             train_data = pd.read_csv(train_file, index_col=0, parse_dates=True)
             val_data = pd.read_csv(val_file, index_col=0, parse_dates=True)
@@ -104,17 +108,32 @@ class OpenBBDataModule(L.LightningDataModule):
             full_data = self._fetch_data()
 
             # Log the range of the fetched data
-            logger.info(f"Fetched data from {full_data.index.min()} to {full_data.index.max()}")
+            logger.info(
+                f"Fetched data from {full_data.index.min()} to {full_data.index.max()}"
+            )
 
             # Convert date strings to datetime objects
-            train_start_date, train_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.train_date)
-            val_start_date, val_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.val_date)
-            test_start_date, test_end_date = map(lambda x: datetime.strptime(x, "%Y-%m-%d"), self.test_date)
+            train_start_date, train_end_date = map(
+                lambda x: datetime.strptime(x, "%Y-%m-%d"), self.train_date
+            )
+            val_start_date, val_end_date = map(
+                lambda x: datetime.strptime(x, "%Y-%m-%d"), self.val_date
+            )
+            test_start_date, test_end_date = map(
+                lambda x: datetime.strptime(x, "%Y-%m-%d"), self.test_date
+            )
 
             # Split the data
-            train_data = full_data[(full_data.index >= train_start_date) & (full_data.index < train_end_date)]
-            val_data = full_data[(full_data.index >= val_start_date) & (full_data.index < val_end_date)]
-            test_data = full_data[(full_data.index >= test_start_date) & (full_data.index < test_end_date)]
+            train_data = full_data[
+                (full_data.index >= train_start_date)
+                & (full_data.index < train_end_date)
+            ]
+            val_data = full_data[
+                (full_data.index >= val_start_date) & (full_data.index < val_end_date)
+            ]
+            test_data = full_data[
+                (full_data.index >= test_start_date) & (full_data.index < test_end_date)
+            ]
 
             # Log the size of each dataset
             logger.info(f"Train data size: {train_data.shape}")
@@ -160,7 +179,9 @@ class OpenBBDataModule(L.LightningDataModule):
             start_str = current_start_date.strftime("%Y-%m-%d")
             end_str = current_end_date.strftime("%Y-%m-%d")
 
-            logger.info(f"Fetching data for {self.ticker} from {start_str} to {end_str}")
+            logger.info(
+                f"Fetching data for {self.ticker} from {start_str} to {end_str}"
+            )
 
             # Fetch data for the current window
             data_chunk = obb.equity.price.historical(
@@ -196,16 +217,24 @@ class OpenBBDataModule(L.LightningDataModule):
         logger.info("Setting up data sequences")
 
         # Convert date strings to datetime objects
-        val_date = datetime.strptime(self.val_date, "%Y-%m-%d")
-        test_date = datetime.strptime(self.test_date, "%Y-%m-%d")
+        val_start_date, val_end_date = map(
+            lambda x: datetime.strptime(x, "%Y-%m-%d"), self.val_date
+        )
+        test_start_date, test_end_date = map(
+            lambda x: datetime.strptime(x, "%Y-%m-%d"), self.test_date
+        )
 
-        train_data = self.data[self.data.index < val_date]
+        train_data = self.train_data[self.train_data.index < val_start_date]
         logger.info(f"Train data shape: {train_data.shape}")
-        val_data = self.data[
-            (self.data.index >= val_date) & (self.data.index < test_date)
+        val_data = self.val_data[
+            (self.val_data.index >= val_start_date)
+            & (self.val_data.index < val_end_date)
         ]
         logger.info(f"Val data shape: {val_data.shape}")
-        test_data = self.data[self.data.index >= test_date]
+        test_data = self.test_data[
+            (self.test_data.index >= test_start_date)
+            & (self.test_data.index < test_end_date)
+        ]
         logger.info(f"Test data shape: {test_data.shape}")
 
         self.train_sequences, self.train_targets = self._prepare_sequences(train_data)
@@ -237,9 +266,7 @@ class OpenBBDataModule(L.LightningDataModule):
         close_prices = data["close"].values
 
         for i in range(len(close_prices) - self.sequence_length - 1):
-            seq = close_prices[
-                i : i + self.sequence_length
-            ]  # A sequence is a window of 'close' prices
+            seq = close_prices[i : i + self.sequence_length]
             # Calculate the 1-day return ratio as the target
             target = (
                 close_prices[i + self.sequence_length]
@@ -252,13 +279,19 @@ class OpenBBDataModule(L.LightningDataModule):
         sequences = np.array(sequences)
         targets = np.array(targets)
 
+        # Apply z-score normalization to sequences
+        seq_mean = sequences.mean(axis=0)
+        seq_std = sequences.std(axis=0)
+        sequences = (sequences - seq_mean) / seq_std
+
+        # Apply z-score normalization to targets
+        target_mean = targets.mean()
+        target_std = targets.std()
+        targets = (targets - target_mean) / target_std
+
         # Convert numpy arrays to tensors
-        sequences_tensor = torch.FloatTensor(sequences).unsqueeze(
-            -1
-        )  # Add a new dimension at the end
-        targets_tensor = torch.FloatTensor(targets).unsqueeze(
-            -1
-        )  # Add a new dimension at the end
+        sequences_tensor = torch.FloatTensor(sequences).unsqueeze(-1)
+        targets_tensor = torch.FloatTensor(targets).unsqueeze(-1)
 
         return sequences_tensor, targets_tensor
 

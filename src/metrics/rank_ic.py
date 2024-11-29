@@ -16,8 +16,8 @@ class RankIC(Metric):
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
-        preds_rank = preds.argsort().argsort()
-        targets_rank = targets.argsort().argsort()
+        preds_rank = preds.view(-1).argsort().argsort()
+        targets_rank = targets.view(-1).argsort().argsort()
         ric = torch.corrcoef(torch.stack((preds_rank.float(), targets_rank.float())))[
             0, 1
         ]

@@ -14,6 +14,8 @@ from src.models.components.lstm import LSTM
 class LSTMForecastModule(AbstractForecast):
     def __init__(
         self,
+        loss: str,
+        input_size: int,
         hidden_size: int,
         num_layers: int,
         dropout: float,
@@ -21,7 +23,18 @@ class LSTMForecastModule(AbstractForecast):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
     ) -> None:
-        super().__init__()
+        # Define the outputs attribute
+        outputs = {
+            "train": ["preds", "targets"],
+            "val": ["preds", "targets"],
+            "test": ["preds", "targets"],
+        }
+
+        super().__init__(
+            outputs=outputs,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
         self.save_hyperparameters()
 
         # Define LSTM model
@@ -32,6 +45,9 @@ class LSTMForecastModule(AbstractForecast):
             dropout=self.hparams.dropout,
         )
         self.fc = nn.Linear(self.hparams.hidden_size, 1)
+
+        # Initialize loss function
+        self.criterion = self._get_loss(self.hparams.loss)
 
         # Define metrics
         self.train_metrics = MetricCollection(
@@ -47,41 +63,123 @@ class LSTMForecastModule(AbstractForecast):
         self.val_metrics = self.train_metrics.clone(prefix="val/")
         self.test_metrics = self.train_metrics.clone(prefix="test/")
 
+        # Initialize step outputs
+        self.training_step_outputs = {key: [] for key in outputs["train"]}
+        self.val_step_outputs = {key: [] for key in outputs["val"]}
+        self.test_step_outputs = {key: [] for key in outputs["test"]}
+
     def forward(self, x):
-        lstm_out, _ = self.lstm(x)
-        return self.fc(lstm_out[:, -1, :])
+        return self.lstm(x)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.MSELoss()(y_hat, y)
+        # print("--- y ---")
+        # print(y.size())
+        # print(y)
+        # print("--- y_hat ---")
+        # print(y_hat.size())
+        # print(y_hat)
+        loss = self.criterion(y_hat, y)
+        # print("--- loss ---")
+        # print(loss)
         self.log("train/loss", loss)
 
         # Update metrics
         self.train_metrics(y_hat, y)
         self.log_dict(self.train_metrics, on_step=False, on_epoch=True)
 
+        # Collect step outputs for metric computation
+        self.training_step_outputs = self._collect_step_outputs(
+            outputs_dict=self.training_step_outputs,
+            local_vars={"preds": y_hat, "targets": y}
+        )
+
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.MSELoss()(y_hat, y)
+        loss = self.criterion(y_hat, y)
         self.log("val/loss", loss)
 
         # Update metrics
         self.val_metrics(y_hat, y)
         self.log_dict(self.val_metrics, on_step=False, on_epoch=True)
 
+        # Collect step outputs for metric computation
+        self.val_step_outputs = self._collect_step_outputs(
+            outputs_dict=self.val_step_outputs,
+            local_vars={"preds": y_hat, "targets": y}
+        )
+
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.MSELoss()(y_hat, y)
+        loss = self.criterion(y_hat, y)
         self.log("test/loss", loss)
 
         # Update metrics
         self.test_metrics(y_hat, y)
         self.log_dict(self.test_metrics, on_step=False, on_epoch=True)
 
+        # Collect step outputs for metric computation
+        self.test_step_outputs = self._collect_step_outputs(
+            outputs_dict=self.test_step_outputs,
+            local_vars={"preds": y_hat, "targets": y}
+        )
+
     def configure_optimizers(self):
         return self.hparams.optimizer(self.parameters(), lr=self.hparams.learning_rate)
+
+    def on_train_epoch_end(self) -> None:
+        # Gather predictions and targets
+        preds = self._gather_step_outputs(self.training_step_outputs, "preds")
+        targets = self._gather_step_outputs(self.training_step_outputs, "targets")
+
+        # Update and log metrics
+        self.train_metrics(preds, targets)
+        self.log_dict(
+            self.train_metrics, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
+        # Clear memory for the next epoch
+        self.training_step_outputs = self._clear_epoch_outputs(
+            self.training_step_outputs
+        )
+
+    def on_validation_epoch_end(self) -> None:
+        # Gather predictions and targets
+        preds = self._gather_step_outputs(self.val_step_outputs, "preds")
+        targets = self._gather_step_outputs(self.val_step_outputs, "targets")
+
+        # Update and log metrics
+        self.val_metrics(preds, targets)
+        self.log_dict(
+            self.val_metrics, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
+        # Clear memory for the next epoch
+        self.val_step_outputs = self._clear_epoch_outputs(self.val_step_outputs)
+
+    def on_test_epoch_end(self) -> None:
+        # Gather predictions and targets
+        preds = self._gather_step_outputs(self.test_step_outputs, "preds")
+        targets = self._gather_step_outputs(self.test_step_outputs, "targets")
+
+        # Update and log metrics
+        self.test_metrics(preds, targets)
+        self.log_dict(
+            self.test_metrics, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
+        # Clear memory for the next epoch
+        self.test_step_outputs = self._clear_epoch_outputs(self.test_step_outputs)
+
+    def _collect_step_outputs(self, outputs_dict, local_vars):
+        # Collect step outputs for metric computation
+        for key, value in local_vars.items():
+            if key not in outputs_dict:
+                outputs_dict[key] = []
+            outputs_dict[key].append(value)
+        return outputs_dict

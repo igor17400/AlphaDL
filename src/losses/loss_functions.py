@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+
 def stock_mixer_loss(prediction, ground_truth, base_price, mask, batch_size, alpha):
     device = prediction.device
     all_one = torch.ones(batch_size, 1, dtype=torch.float32).to(device)
