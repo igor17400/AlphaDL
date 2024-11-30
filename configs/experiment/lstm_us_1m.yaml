@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python train.py experiment=lstm_appl_nov
+# python train.py experiment=lstm_aapl_us_1m
 
 defaults:
   - override /data: us_minute.yaml
@@ -10,15 +10,12 @@ defaults:
   - override /logger: many_loggers.yaml
   - override /trainer: gpu.yaml
 
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
-
-tags: ["lstm", "aapl", "high_freq", "mseloss", "nov"]
+tags: ["lstm", "aapl", "1m"]
 
 seed: 42
 
 data:
-  ticker: "AAPL"
+  selected_tickers: ["AAPL", "MSFT"]
 
 callbacks:
   early_stopping:
@@ -29,6 +26,6 @@ trainer:
 
 logger:
   wandb:
-    name: "lstm_appl_nov"
+    name: "lstm_aapl_1m"
     tags: ${tags}
-    group: "apppl_nov"
+    group: "aapl_1m"

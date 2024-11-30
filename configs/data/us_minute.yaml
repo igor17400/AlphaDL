@@ -1,18 +1,19 @@
 _target_: src.data.openbb_datamodule.OpenBBDataModule
 
 # default parameters
-sequence_length: 30        # Default sequence length
-batch_size: 64             # Default batch size
-cache_dir: "./data"       # Default cache directory
-use_cache: true            # Default to using cache
-provider: "fmp"  # Default data provider
-openbb_output_type: "dataframe"  # Default output type
-
+sequence_length: 30        
+batch_size: 64            
+cache_dir: "./data"       
+use_cache: true           
+provider: "fmp"  
+openbb_output_type: "dataframe"  
+max_prediction_length: 6
 
 # dataframe settings
-ticker: "AAPL"
-train_date: ["2024-09-01", "2024-10-29"]  # Start and end date for training
-val_date: ["2024-10-29", "2024-11-05"]    # Start and end date for validation
-test_date: ["2024-11-05", "2024-11-07"]   # Start and end date for testing
+selected_tickers: null
+index: "sp500"
+train_date: ["2024-01-01", "2024-09-30"]  # Start and end date for training
+val_date: ["2024-10-01", "2024-11-05"]    # Start and end date for validation
+test_date: ["2024-11-05", "2024-11-07"]   # Start and end date for testing - ELECTION PERIOD
 interval: "1m"
 market: "US"

@@ -5,6 +5,7 @@ import torch
 from lightning import LightningModule
 from torch.nn import MSELoss
 from torchmetrics import MeanMetric, MinMetric
+from pytorch_forecasting.metrics import QuantileLoss
 
 
 class AbstractForecast(LightningModule):
@@ -25,7 +26,8 @@ class AbstractForecast(LightningModule):
         self,
         outputs: Dict[str, List[str]],
         optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler,
+        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+        loss: str = "mse_loss",
         *args,
         **kwargs,
     ) -> None:
@@ -48,6 +50,9 @@ class AbstractForecast(LightningModule):
         for stage in outputs:
             stage_outputs = outputs[stage]
             self.step_outputs[stage] = {key: [] for key in stage_outputs}
+
+        # Initialize loss function
+        self.criterion = self._get_loss(self.hparams.loss)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -95,12 +100,14 @@ class AbstractForecast(LightningModule):
     def _init_embedding(self, filepath: str) -> torch.Tensor:
         return torch.from_numpy(np.load(filepath)).float().to(self.device)
 
-    def _get_loss(self, criterion) -> Callable:
+    def _get_loss(self, criterion: str) -> Callable:
         """Returns an instantiated loss object based on the specified criterion."""
         if criterion == "mse_loss":
             return MSELoss()
+        elif criterion == "quantile_loss":
+            return QuantileLoss()
         else:
-            raise ValueError(f"Loss not defined: {self.hparams.loss}")
+            raise ValueError(f"Loss not defined: {criterion}")
 
     def _collect_model_outputs(
         self, vector: torch.Tensor, mask: torch.Tensor
