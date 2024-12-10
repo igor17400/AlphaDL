@@ -33,6 +33,9 @@ ENV/
 *.swo
 .DS_Store
 
+db/*
+
 # Project specific
 data/*
+data/US/*
 !data/.gitkeep

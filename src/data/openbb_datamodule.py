@@ -72,16 +72,16 @@ class OpenBBDataModule(L.LightningDataModule):
         """
         Prepares the data for the model by either loading it from a cache file or fetching it from OpenBB.
         """
-        # Define the path to the cache directory
-        cache_dir = os.path.join(
-            self.cache_dir, self.market, self.interval, "SP500"
-        )
-        os.makedirs(cache_dir, exist_ok=True)  # Ensure the cache directory exists
+        # Define the path to the cache directory and tickers subdirectory
+        cache_dir = os.path.join(self.cache_dir, self.market, self.interval, self.index)
+        tickers_dir = os.path.join(cache_dir, "tickers")
+        os.makedirs(tickers_dir, exist_ok=True)  # Ensure the tickers directory exists
 
-        # Define paths for the train, val, and test CSV files
+        # Define paths for the train, val, and test CSV files (in root cache dir)
         train_file = os.path.join(cache_dir, "train.csv")
         val_file = os.path.join(cache_dir, "val.csv")
         test_file = os.path.join(cache_dir, "test.csv")
+        all_file = os.path.join(cache_dir, "ALL.csv")
 
         # Check if the cache files exist and use them if available
         if self.use_cache and all(
@@ -94,7 +94,13 @@ class OpenBBDataModule(L.LightningDataModule):
         else:
             # If cache files do not exist, fetch the data
             logger.info("Fetching data using OpenBB")
-            full_data = self._fetch_data()
+            if not os.path.exists(all_file):
+                full_data = self._fetch_data()
+            else:
+                full_data = pd.read_csv(all_file, index_col=0, parse_dates=True)
+
+            # Ensure the index is a datetime index
+            full_data.index = pd.to_datetime(full_data.index)
 
             # Log the range of the fetched data
             logger.info(
@@ -117,20 +123,15 @@ class OpenBBDataModule(L.LightningDataModule):
 
             # Split the data
             train_data = full_data[
-                (full_data.index >= train_start_date)
-                & (full_data.index < train_end_date)
+                (full_data.date >= train_start_date)
+                & (full_data.date <= train_end_date)
             ]
             val_data = full_data[
-                (full_data.index >= val_start_date) & (full_data.index < val_end_date)
+                (full_data.date >= val_start_date) & (full_data.date <= val_end_date)
             ]
             test_data = full_data[
-                (full_data.index >= test_start_date) & (full_data.index < test_end_date)
+                (full_data.date >= test_start_date) & (full_data.date <= test_end_date)
             ]
-
-            # Ensure the index is unique for each dataset
-            train_data = train_data[~train_data.index.duplicated(keep='first')]
-            val_data = val_data[~val_data.index.duplicated(keep='first')]
-            test_data = test_data[~test_data.index.duplicated(keep='first')]
 
             # Save the data to cache
             train_data.to_csv(train_file)
@@ -144,8 +145,8 @@ class OpenBBDataModule(L.LightningDataModule):
     def _fetch_data(self):
         # Fetch the list of constituents for the specified index
         constituents = obb.index.constituents(symbol=self.index, provider=self.provider)
-        
-        tickers = constituents['symbol'].tolist()
+
+        tickers = constituents["symbol"].tolist()
 
         # If selected_tickers is provided, filter the tickers list
         if self.selected_tickers:
@@ -164,7 +165,9 @@ class OpenBBDataModule(L.LightningDataModule):
 
         for ticker in tickers:
             current_start_date = overall_start_date
-            ticker_data = pd.DataFrame()  # DataFrame to store data for the current ticker
+            ticker_data = (
+                pd.DataFrame()
+            )  # DataFrame to store data for the current ticker
             while current_start_date < overall_end_date:
                 # Calculate the end date for the current window
                 current_end_date = current_start_date + pd.Timedelta(days=3)
@@ -175,9 +178,7 @@ class OpenBBDataModule(L.LightningDataModule):
                 start_str = current_start_date.strftime("%Y-%m-%d")
                 end_str = current_end_date.strftime("%Y-%m-%d")
 
-                logger.info(
-                    f"Fetching data for {ticker} from {start_str} to {end_str}"
-                )
+                logger.info(f"Fetching data for {ticker} from {start_str} to {end_str}")
 
                 try:
                     # Fetch data for the current window
@@ -190,7 +191,7 @@ class OpenBBDataModule(L.LightningDataModule):
                     )
 
                     # Add a ticker column to the data_chunk
-                    data_chunk['ticker'] = ticker
+                    data_chunk["ticker"] = ticker
 
                     # Append the fetched data to the ticker_data DataFrame
                     ticker_data = pd.concat([ticker_data, data_chunk])
@@ -211,21 +212,30 @@ class OpenBBDataModule(L.LightningDataModule):
                     time.sleep(60)  # Wait for 60 seconds
                     api_call_count = 0  # Reset the API call count
 
-            # Ensure the index is unique for the ticker data
-            ticker_data = ticker_data[~ticker_data.index.duplicated(keep='first')]
+            # Remove duplicates from the ticker data
+            ticker_data = ticker_data.drop_duplicates()
 
-            # Save the data for the current ticker
-            ticker_file = os.path.join(self.cache_dir, self.market, self.interval, "SP500", f"{ticker}.csv")
+            # Save the data for the current ticker in the tickers subdirectory
+            ticker_file = os.path.join(
+                self.cache_dir, 
+                self.market, 
+                self.interval, 
+                self.index, 
+                "tickers",
+                f"{ticker}.csv"
+            )
             ticker_data.to_csv(ticker_file)
 
             # Append the ticker data to the all_data DataFrame
             all_data = pd.concat([all_data, ticker_data])
 
-        # Ensure the index is unique for the combined data
-        all_data = all_data[~all_data.index.duplicated(keep='first')]
+        # Remove duplicates from the combined data
+        all_data = all_data.drop_duplicates()
 
         # Save all data to ALL.csv
-        all_file = os.path.join(self.cache_dir, self.market, self.interval, "SP500", "ALL.csv")
+        all_file = os.path.join(
+            self.cache_dir, self.market, self.interval, self.index, "ALL.csv"
+        )
         all_data.to_csv(all_file)
 
         # Log the fetched data to check its content
@@ -242,17 +252,17 @@ class OpenBBDataModule(L.LightningDataModule):
         df.index = pd.to_datetime(df.index)
 
         # Extract month and day from the date
+        df["date"] = df.index
         df["month"] = df.index.month
         df["day"] = df.index.day
 
         def create_time_idx(group):
             # Use pd.factorize to create a continuous index for each symbol's time series
-            group['time_idx'] = pd.factorize(group.index)[0]
+            group["time_idx"] = pd.factorize(group.index)[0]
             return group
 
         # Apply the time index creation function to each group
-        df_index = df.index
-        df = df.groupby('ticker').apply(create_time_idx).reset_index(drop=True).set_index(df_index)
+        df = df.groupby("ticker").apply(create_time_idx).reset_index(drop=True)
 
         return df
 

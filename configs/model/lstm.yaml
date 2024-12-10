@@ -3,12 +3,16 @@ _target_: src.models.forecast.lstm_module.LSTMForecastModule
 # training strategy
 loss: "mse_loss"
 
+outputs:
+  train: ["loss", "preds", "targets"]
+  val: ["loss", "preds", "targets"]
+  test: ["loss", "preds", "targets"]
+
 # LSTM parameters
 input_size: 1           # Number of features in the input data
 hidden_size: 64        # Number of features in the hidden state
 num_layers: 2           # Number of recurrent layers
 dropout: 0.2            # Dropout probability for LSTM layers
-learning_rate: 0.001    # Learning rate for the optimizer
 
 optimizer:
   _target_: torch.optim.Adam
