@@ -4,15 +4,15 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 import time
+from typing import Tuple
 
 import lightning as L
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 import torch
 from openbb import obb
 import pandas as pd
 import numpy as np
-from pytorch_forecasting import TimeSeriesDataSet
-from pytorch_forecasting.data import GroupNormalizer
+from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -266,50 +266,63 @@ class OpenBBDataModule(L.LightningDataModule):
 
         return df
 
+    def _prepare_sequence_data(self, df: pd.DataFrame) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Convert DataFrame into sequences for LSTM training"""
+        sequences = []
+        targets = []
+        
+        # Group by ticker to maintain separate sequences per stock
+        for ticker in df['ticker'].unique():
+            ticker_data = df[df['ticker'] == ticker].sort_index()
+            
+            # Normalize data per ticker
+            scaler = StandardScaler()
+            features = ['open', 'high', 'low', 'close', 'volume']
+            normalized_data = scaler.fit_transform(ticker_data[features])
+            
+            # Create sequences
+            for i in range(len(normalized_data) - self.sequence_length - self.max_prediction_length + 1):
+                seq = normalized_data[i:(i + self.sequence_length)]
+                target = normalized_data[i + self.sequence_length:i + self.sequence_length + self.max_prediction_length, 3]  # 3 is close price
+                
+                sequences.append(seq)
+                targets.append(target)
+        
+        return torch.FloatTensor(sequences), torch.FloatTensor(targets)
+
     def setup(self, stage=None):
-        logger.info("Setting up data sequences")
-
-        # Create the training TimeSeriesDataSet
-        self.training = TimeSeriesDataSet(
-            self.train_data,
-            time_idx="time_idx",
-            target="close",
-            group_ids=["ticker"],
-            max_encoder_length=self.sequence_length,
-            max_prediction_length=self.max_prediction_length,
-            static_categoricals=["ticker"],
-            time_varying_known_reals=["open", "high", "low", "volume"],
-            time_varying_unknown_reals=["close"],
-            target_normalizer=GroupNormalizer(
-                groups=["ticker"], transformation="softplus"
-            ),
-            add_relative_time_idx=True,
-            add_target_scales=True,
-            add_encoder_length=True,
-        )
-
-        # Create the validation TimeSeriesDataSet
-        self.validation = TimeSeriesDataSet.from_dataset(
-            self.training, self.val_data, predict=True, stop_randomization=True
-        )
+        """Prepare data for training/validation/testing"""
+        if stage == 'fit' or stage is None:
+            # Convert DataFrames to sequence data
+            self.train_sequences, self.train_targets = self._prepare_sequence_data(self.train_data)
+            self.val_sequences, self.val_targets = self._prepare_sequence_data(self.val_data)
+            
+        if stage == 'test' or stage is None:
+            self.test_sequences, self.test_targets = self._prepare_sequence_data(self.test_data)
 
     def train_dataloader(self):
-        logger.info("Creating train dataloader")
-        return self.training.to_dataloader(
-            train=True, batch_size=self.batch_size, num_workers=0
+        train_dataset = TensorDataset(self.train_sequences, self.train_targets)
+        return DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=0
         )
 
     def val_dataloader(self):
-        logger.info("Creating validation dataloader")
-        return self.validation.to_dataloader(
-            train=False, batch_size=self.batch_size * 10, num_workers=0
+        val_dataset = TensorDataset(self.val_sequences, self.val_targets)
+        return DataLoader(
+            val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=0
         )
 
     def test_dataloader(self):
-        logger.info("Creating test dataloader")
-        test_dataset = TimeSeriesDataSet.from_dataset(
-            self.training, self.test_data, predict=True, stop_randomization=True
-        )
-        return test_dataset.to_dataloader(
-            train=False, batch_size=self.batch_size * 10, num_workers=0
+        test_dataset = TensorDataset(self.test_sequences, self.test_targets)
+        return DataLoader(
+            test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=0
         )
