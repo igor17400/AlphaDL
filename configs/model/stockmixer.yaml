@@ -1,0 +1,25 @@
+_target_: src.models.forecast.stockmixer_module.StockMixerModule
+
+# training strategy
+loss: stock_mixer_loss  # Specify the loss function to use
+alpha: 0.1  # Weight for ranking loss
+
+outputs:
+  train: ["loss", "predictions", "targets", "mask"]
+  val: ["loss", "predictions", "targets", "mask"]
+  test: ["loss", "predictions", "targets", "mask"]
+
+# StockMixer parameters
+stocks: 101          # Number of stocks in dataset
+time_steps: 16        # Lookback window length
+channels: 5           # Number of features (OHLCV)
+market: 20           # Market dimension for NoGraphMixer
+scale: 3             # Scale factor for the model
+
+# Optimizer settings
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+
+scheduler: null

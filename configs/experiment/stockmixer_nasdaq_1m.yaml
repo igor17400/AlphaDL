@@ -1,0 +1,40 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=stockmixer_nasdaq_1m
+
+defaults:
+  - override /data: us_minute.yaml
+  - override /model: stockmixer.yaml
+  - override /callbacks: default.yaml
+  - override /logger: many_loggers.yaml
+  - override /trainer: gpu.yaml
+
+tags: ["stockmixer", "nasdaq", "1m"]
+
+seed: 42
+
+data:
+  index: "nasdaq"
+  sequence_length: 16
+  batch_size: 1  # Set to 1 to maintain temporal ordering in time series data.
+                 # While larger batch sizes could process multiple days in parallel,
+                 # this would risk:
+                 # 1. Breaking temporal dependencies
+                 # 2. Creating look-ahead bias
+                 # 3. Mixing data from different temporal contexts
+                 # The model still processes all N stocks (ex: N = 101) in parallel for each day
+  #selected_tickers: ["AAPL", "MSFT"]
+
+callbacks:
+  early_stopping:
+    patience: 5
+
+trainer:
+  max_epochs: 20
+
+logger:
+  wandb:
+    name: "stockmixer_nasdaq_1m"
+    tags: ${tags}
+    group: "nasdaq_1m"

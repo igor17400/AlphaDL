@@ -1,9 +1,0 @@
-model:
-  name: stock_mixer
-  class_name: StockMixer
-  params:
-    stocks: 10
-    time_steps: 30
-    channels: 64
-    market: 20
-    scale: 1

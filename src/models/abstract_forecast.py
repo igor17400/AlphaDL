@@ -5,7 +5,6 @@ import torch
 from lightning import LightningModule
 from torch.nn import MSELoss
 from torchmetrics import MeanMetric, MinMetric
-from pytorch_forecasting.metrics import QuantileLoss
 
 
 class AbstractForecast(LightningModule):
@@ -104,18 +103,15 @@ class AbstractForecast(LightningModule):
         """Returns an instantiated loss object based on the specified criterion."""
         if criterion == "mse_loss":
             return MSELoss()
-        elif criterion == "quantile_loss":
-            return QuantileLoss()
+        elif criterion == "stock_mixer_loss":
+            from src.models.components.losses import StockMixerLoss
+            return StockMixerLoss(alpha=self.hparams.alpha)
         else:
             raise ValueError(f"Loss not defined: {criterion}")
 
-    def _collect_model_outputs(
-        self, vector: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
+    def _collect_model_outputs(self, vector: torch.Tensor) -> torch.Tensor:
         """Concatenates model outputs for metric computation."""
-        model_output = torch.cat(
-            [vector[n][mask[n]] for n in range(mask.shape[0])], dim=0
-        )
+        model_output = torch.cat([vector[n] for n in range(vector.shape[0])], dim=0)
         return model_output
 
     def _collect_step_outputs(

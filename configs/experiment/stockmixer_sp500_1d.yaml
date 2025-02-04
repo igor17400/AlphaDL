@@ -1,0 +1,48 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=stockmixer_sp500_1d
+
+defaults:
+  - override /data: us_daily.yaml
+  - override /model: stockmixer.yaml
+  - override /callbacks: default.yaml
+  - override /logger: many_loggers.yaml
+  - override /trainer: gpu.yaml
+
+tags: ["stockmixer", "sp500", "1d"]
+
+seed: 42
+
+model:
+  stocks: 474
+  market: 8
+
+data:
+  index: "sp500"
+  sequence_length: 16
+  # StockMixer same dates
+  train_date: ["2016-01-04", "2019-01-03"]
+  val_date: ["2019-01-04", "2020-01-04"]
+  test_date: ["2020-01-06", "2022-05-25"]
+  batch_size: 1  # Set to 1 to maintain temporal ordering in time series data.
+                 # While larger batch sizes could process multiple days in parallel,
+                 # this would risk:
+                 # 1. Breaking temporal dependencies
+                 # 2. Creating look-ahead bias
+                 # 3. Mixing data from different temporal contexts
+                 # The model still processes all N stocks (ex: N = 101) in parallel for each day
+
+callbacks:
+  early_stopping:
+    patience: 5
+
+trainer:
+  max_epochs: 100
+  min_epochs: 100
+
+logger:
+  wandb:
+    name: "stockmixer_sp500_1d"
+    tags: ${tags}
+    group: "nasdaq_1d"
