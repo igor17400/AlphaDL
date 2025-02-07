@@ -10,7 +10,7 @@ outputs:
   test: ["loss", "predictions", "targets", "mask"]
 
 # StockMixer parameters
-stocks: 101          # Number of stocks in dataset
+num_stocks: 101          # Number of stocks in dataset
 time_steps: 16        # Lookback window length
 channels: 5           # Number of features (OHLCV)
 market: 20           # Market dimension for NoGraphMixer

@@ -15,8 +15,8 @@ tags: ["stockmixer", "sp500", "1d"]
 seed: 42
 
 model:
-  stocks: 474
-  market: 8
+  num_stocks: 474
+  market: 8 # Following the paper definition for SP500
 
 data:
   index: "sp500"

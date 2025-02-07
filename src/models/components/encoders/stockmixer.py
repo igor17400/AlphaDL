@@ -137,12 +137,12 @@ class MultTime2dMixer(nn.Module):
 
 
 class NoGraphMixer(nn.Module):
-    def __init__(self, stocks, hidden_dim=20):
+    def __init__(self, num_stocks, hidden_dim=20):
         super(NoGraphMixer, self).__init__()
-        self.dense1 = nn.Linear(stocks, hidden_dim)
+        self.dense1 = nn.Linear(num_stocks, hidden_dim)
         self.activation = nn.Hardswish()
-        self.dense2 = nn.Linear(hidden_dim, stocks)
-        self.layer_norm_stock = nn.LayerNorm(stocks)
+        self.dense2 = nn.Linear(hidden_dim, num_stocks)
+        self.layer_norm_stock = nn.LayerNorm(num_stocks)
 
     def forward(self, inputs):
         # inputs shape: [n_stocks, features]
@@ -157,7 +157,7 @@ class NoGraphMixer(nn.Module):
 
 
 class StockMixer(nn.Module):
-    def __init__(self, stocks, time_steps, channels, market, scale):
+    def __init__(self, num_stocks, time_steps, channels, market, scale):
         super(StockMixer, self).__init__()
         scale_dim = 8
         self.mixer = MultTime2dMixer(time_steps, channels, scale_dim=scale_dim)
@@ -166,7 +166,7 @@ class StockMixer(nn.Module):
         self.conv = nn.Conv1d(
             in_channels=channels, out_channels=channels, kernel_size=2, stride=2
         )
-        self.stock_mixer = NoGraphMixer(stocks, market)
+        self.stock_mixer = NoGraphMixer(num_stocks, market)
         self.time_fc_ = nn.Linear(time_steps * 2 + scale_dim, 1)
 
     def forward(self, inputs):

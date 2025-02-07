@@ -3,9 +3,13 @@ import torch
 from torchmetrics import MetricCollection
 from torchmetrics.regression import MeanSquaredError
 import numpy as np
+from tqdm import tqdm
+import logging
 
 from src.models.abstract_forecast import AbstractForecast
 from src.models.components.encoders.stockmixer import StockMixer
+
+logger = logging.getLogger(__name__)
 
 
 class StockMixerModule(AbstractForecast):
@@ -13,7 +17,7 @@ class StockMixerModule(AbstractForecast):
     PyTorch Lightning module for the StockMixer model.
 
     Attributes:
-        stocks: Number of stocks in the dataset
+        num_stocks: Number of stocks in the dataset
         time_steps: Number of time steps to look back
         channels: Number of features per stock (OHLCV = 5)
         market: Market dimension for NoGraphMixer
@@ -26,7 +30,7 @@ class StockMixerModule(AbstractForecast):
 
     def __init__(
         self,
-        stocks: int,
+        num_stocks: int,
         time_steps: int,
         channels: int,
         market: int = 20,
@@ -36,6 +40,7 @@ class StockMixerModule(AbstractForecast):
         optimizer: torch.optim.Optimizer = None,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         loss: str = "mse_loss",
+        learning_rate: float = 0.001,
     ):
         if outputs is None:
             outputs = {
@@ -77,7 +82,7 @@ class StockMixerModule(AbstractForecast):
         self.test_step_outputs = {}
 
         self.model = StockMixer(
-            stocks=stocks,
+            num_stocks=num_stocks,
             time_steps=time_steps,
             channels=channels,
             market=market,
@@ -95,35 +100,62 @@ class StockMixerModule(AbstractForecast):
         self.val_metrics = metrics.clone(prefix="val/")
         self.test_metrics = metrics.clone(prefix="test/")
 
+        # Initialize optimizer with learning rate
+        if optimizer is None:
+            self.optimizer = torch.optim.Adam(
+                self.parameters(), lr=learning_rate)
+        else:
+            self.optimizer = optimizer
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
-        """Perform a single model step on a batch of data."""
-        data_batch, price_batch, ground_truth_batch, dates_batch = batch
-        
-        # Assuming that the batch size is equal to 1
-        data_batch = data_batch.squeeze(0)
-        price_batch = price_batch.squeeze(0)
-        ground_truth_batch = ground_truth_batch.squeeze(0)
-        
-        # Forward pass
-        prediction = self.forward(data_batch)
-        
+        """
+        Perform a single model step on a batch of data.
+
+        Process:
+        1. Model predicts closing prices for current date using historical data
+        2. Convert predictions to returns using current date's actual close price
+        3. Compare predicted returns with actual returns
+
+        Args:
+            batch: Tuple containing:
+                - data_batch: Historical OHLCV data [batch, num_stocks, sequence_length, features]
+                - price_batch: Current date's close prices [num_stocks, 1]
+                - ground_truth_batch: Actual returns for current date [num_stocks, 1]
+                - dates_batch: Dates information
+                - current_date: Current prediction date
+        """
+        data_batch, price_batch, ground_truth_batch, dates_batch, current_date = batch
+
+        # Forward pass to predict close prices for current date
+        prediction = self.forward(data_batch.squeeze(0))
+
+        # Reshape tensors to [n_stocks, 1]
+        # Predicted close prices for current date
+        prediction = prediction.view(-1, 1)
+        # Actual returns for current date
+        ground_truth_batch = ground_truth_batch.view(-1, 1)
+        price_batch = price_batch.view(-1, 1)  # Current date's close prices
+
+        # Convert predicted prices to returns
+        predicted_returns = torch.div(
+            torch.sub(prediction, price_batch), price_batch)
+
         # Calculate losses using the loss module
-        loss, reg_loss, rank_loss, return_ratio = self.criterion(
-            prediction=prediction,
+        loss, reg_loss, rank_loss = self.criterion(
+            predicted_returns=predicted_returns,
             ground_truth=ground_truth_batch,
-            base_price=price_batch,
         )
-        
+
         return {
             "loss": loss,
             "reg_loss": reg_loss,
             "rank_loss": rank_loss,
-            "predictions": return_ratio,
+            "predictions": predicted_returns,
             "targets": ground_truth_batch,
         }
 
@@ -157,7 +189,8 @@ class StockMixerModule(AbstractForecast):
             self.training_step_outputs, step_output
         )
 
-        return step_output
+        # Return the primary loss for backpropagation
+        return step_output["loss"]
 
     def validation_step(
         self,
@@ -168,8 +201,10 @@ class StockMixerModule(AbstractForecast):
 
         # Log losses
         self.val_loss(step_output["loss"])
-        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/reg_loss", step_output["reg_loss"], on_step=False, on_epoch=True)
+        self.log("val/loss", self.val_loss, on_step=False,
+                 on_epoch=True, prog_bar=True)
+        self.log("val/reg_loss",
+                 step_output["reg_loss"], on_step=False, on_epoch=True)
         self.log(
             "val/rank_loss", step_output["rank_loss"], on_step=False, on_epoch=True
         )
@@ -199,7 +234,8 @@ class StockMixerModule(AbstractForecast):
         self.log(
             "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
         )
-        self.log("test/reg_loss", step_output["reg_loss"], on_step=False, on_epoch=True)
+        self.log("test/reg_loss",
+                 step_output["reg_loss"], on_step=False, on_epoch=True)
         self.log(
             "test/rank_loss", step_output["rank_loss"], on_step=False, on_epoch=True
         )
@@ -219,10 +255,8 @@ class StockMixerModule(AbstractForecast):
 
     def on_train_epoch_end(self) -> None:
         # Log metrics
-        self.log_dict(self.train_metrics.compute(), on_epoch=True, prog_bar=True)
-
-        # Calculate and log IC
-        self._calculate_epoch_metrics(self.training_step_outputs, "train")
+        self.log_dict(self.train_metrics.compute(),
+                      on_epoch=True, prog_bar=True)
 
         # Clear outputs
         self.training_step_outputs = self._clear_epoch_outputs(
@@ -238,7 +272,7 @@ class StockMixerModule(AbstractForecast):
         self.val_loss_best(val_loss)
         self.log("val/loss_best", self.val_loss_best.compute(), prog_bar=True)
 
-        # Calculate and log IC
+        # Calculate and log IC, RIC, Precision@N, and Sharpe
         self._calculate_epoch_metrics(self.validation_step_outputs, "val")
 
         # Clear outputs
@@ -248,13 +282,15 @@ class StockMixerModule(AbstractForecast):
 
     def on_test_epoch_end(self) -> None:
         # Log metrics
-        self.log_dict(self.test_metrics.compute(), on_epoch=True, prog_bar=True)
+        self.log_dict(self.test_metrics.compute(),
+                      on_epoch=True, prog_bar=True)
 
-        # Calculate and log IC
+        # Calculate and log IC, RIC, Precision@N, and Sharpe
         self._calculate_epoch_metrics(self.test_step_outputs, "test")
 
         # Clear outputs
-        self.test_step_outputs = self._clear_epoch_outputs(self.test_step_outputs)
+        self.test_step_outputs = self._clear_epoch_outputs(
+            self.test_step_outputs)
 
     def _calculate_epoch_metrics(
         self, step_outputs: Dict[str, List[torch.Tensor]], stage: str
@@ -262,122 +298,172 @@ class StockMixerModule(AbstractForecast):
         """Calculate epoch-level metrics including IC, RIC, Precision@N, and Sharpe ratio."""
         predictions = self._gather_step_outputs(step_outputs, "predictions")
         targets = self._gather_step_outputs(step_outputs, "targets")
-        
-        # Calculate metrics without mask
+
+        # Calculate and log each metric
         ic = self._calculate_ic(predictions, targets)
-        self.log(f"{stage}/IC", ic, on_epoch=True, prog_bar=True)
-        
         ric = self._calculate_ric(predictions, targets)
-        self.log(f"{stage}/RIC", ric, on_epoch=True, prog_bar=True)
-        
-        prec_10 = self._calculate_precision_at_n(predictions, targets, n=10)
-        self.log(f"{stage}/Precision@10", prec_10, on_epoch=True, prog_bar=True)
-        
+        precision = self._calculate_precision_at_n(predictions, targets, n=10)
         sharpe = self._calculate_sharpe_ratio(predictions, targets)
+
+        # Log metrics
+        self.log(f"{stage}/IC", ic, on_epoch=True, prog_bar=True)
+        self.log(f"{stage}/RIC", ric, on_epoch=True, prog_bar=True)
+        self.log(f"{stage}/Precision@10", precision,
+                 on_epoch=True, prog_bar=True)
         self.log(f"{stage}/Sharpe", sharpe, on_epoch=True, prog_bar=True)
 
     def _calculate_ic(self, predictions: torch.Tensor, targets: torch.Tensor) -> float:
         """
-        Calculate Information Coefficient (Spearman rank correlation) for the current timestamp.
+        Calculate Information Coefficient (IC) using Pearson correlation for the current timestamp.
         """
         # Ensure we're working with the right shape
         predictions = predictions.squeeze()
         targets = targets.squeeze()
-        
-        # Convert to ranks
-        pred_ranks = predictions.argsort().argsort().float()
-        target_ranks = targets.argsort().argsort().float()
-        
-        # Calculate Spearman correlation
+
         n = len(predictions)
         if n < 2:  # Need at least 2 points for correlation
             return 0.0
-        
-        # Standardize the ranks
-        pred_ranks = (pred_ranks - pred_ranks.mean()) / pred_ranks.std()
-        target_ranks = (target_ranks - target_ranks.mean()) / target_ranks.std()
-        
-        # Calculate correlation
-        spearman_corr = (pred_ranks * target_ranks).mean()
-        
-        return spearman_corr.item()
+
+        # Standardize the values (zero mean, unit variance)
+        pred_std = (predictions - predictions.mean()) / predictions.std()
+        target_std = (targets - targets.mean()) / targets.std()
+
+        # Calculate Pearson correlation
+        pearson_corr = (pred_std * target_std).mean()
+
+        return pearson_corr.item()
 
     def _calculate_ric(self, predictions: torch.Tensor, targets: torch.Tensor) -> float:
         """
-        Calculate Rank Information Coefficient (RIC).
-        RIC is IC normalized by its standard deviation: RIC = mean(IC) / std(IC)
+        Calculate Rank Information Coefficient (RIC) using Spearman rank correlation.
+        RIC measures the correlation between the rankings of predicted and actual returns.
         """
         # Ensure we're working with the right shape
         predictions = predictions.squeeze()
         targets = targets.squeeze()
-        
-        # Calculate IC for each stock
-        ic_values = []
-        for i in range(len(predictions)):
-            if i + 1 < len(predictions):  # ensure we have at least 2 points
-                pred_window = predictions[i:i+2]  # use sliding window of 2
-                target_window = targets[i:i+2]
-                ic = self._calculate_ic(pred_window, target_window)
-                ic_values.append(ic)
-        
-        ic_values = np.array(ic_values)
-        
-        # Calculate RIC as mean(IC)/std(IC)
-        if len(ic_values) > 1 and np.std(ic_values) != 0:
-            return np.mean(ic_values) / np.std(ic_values)
-        return 0.0
+
+        # Convert tensors to numpy for ranking
+        pred_np = predictions.cpu().numpy()
+        target_np = targets.cpu().numpy()
+
+        # Calculate rankings
+        pred_ranks = np.argsort(np.argsort(pred_np))
+        target_ranks = np.argsort(np.argsort(target_np))
+
+        n = len(predictions)
+        if n < 2:  # Need at least 2 points for correlation
+            return 0.0
+
+        # Calculate Spearman correlation
+        # Formula: 1 - (6 * sum(d²) / (n * (n² - 1))), where d is rank difference
+        d = pred_ranks - target_ranks
+        spearman_corr = 1 - (6 * np.sum(d**2)) / (n * (n**2 - 1))
+
+        return float(spearman_corr)
 
     def _calculate_precision_at_n(self, predictions: torch.Tensor, targets: torch.Tensor, n: int = 10) -> float:
         """
         Calculate Precision@N for the current timestamp.
-        Precision@N is the percentage of positive returns in the top N predictions.
-        For example, if 4 out of top 10 predictions have positive returns, Precision@10 = 40%.
+        Precision@N measures how many of our predicted positive returns actually resulted in positive returns.
+        For example, if we predicted 10 positive returns and 4 of them actually were positive, Precision@10 = 40%.
         """
         # Ensure we're working with the right shape
         predictions = predictions.squeeze()
         targets = targets.squeeze()
-        
+
         if len(predictions) < n:
             return 0.0
-        
+
         # Get indices of top N predictions based on predicted returns
         _, top_indices = torch.topk(predictions, n)
-        
-        # Get actual returns for top N predictions
+
+        # Get predictions and actual returns for top N predictions
+        top_predictions = predictions[top_indices]
         top_targets = targets[top_indices]
-        
-        # Calculate percentage of positive returns in top N predictions
-        # (count of returns >= 0) / N * 100
-        precision = (top_targets >= 0).float().mean().item() * 100
-        
+
+        # Count where we predicted positive returns (prediction > 0)
+        # and the actual returns were also positive (target > 0)
+        true_positives = ((top_predictions > 0) & (
+            top_targets > 0)).float().sum()
+        # Count total positive predictions
+        predicted_positives = (top_predictions > 0).float().sum()
+
+        # Calculate precision
+        # If we had no positive predictions, return 0 to avoid division by zero
+        precision = (true_positives / predicted_positives.clamp(min=1)).item()
+
         return precision
 
-    def _calculate_sharpe_ratio(self, predictions: torch.Tensor, targets: torch.Tensor) -> float:
+    def _calculate_sharpe_ratio(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        freq: str = 'day',
+        annual_rf_rate: float = None
+    ) -> float:
         """
         Calculate Sharpe ratio using top 5 predictions for the current timestamp.
         SR = (R - Rf) / σ, where:
-        - R is the portfolio return
-        - Rf is the risk-free rate (assumed 0)
-        - σ is the standard deviation of returns
+        - R is the portfolio return (annualized)
+        - Rf is the risk-free rate (annualized)
+        - σ is the annualized standard deviation of returns
+
+        Args:
+            predictions: Predicted returns
+            targets: Actual returns
+            freq: Data frequency ('1min', '5min', '15min', 'hour', 'day')
+            annual_rf_rate: Annual risk-free rate (e.g., 0.045 for 4.5%)
+                          If None, assumes 0 (excess returns)
+
+        Annualization factors (assuming 6.5 trading hours):
+        - 1-minute: √(252 * 6.5 * 60) ≈ √98,280 ≈ 313.5
+        - 5-minute: √(252 * 6.5 * 12) ≈ √19,656 ≈ 140.2
+        - 15-minute: √(252 * 6.5 * 4) ≈ √6,552 ≈ 80.9
+        - Hours: √(252 * 6.5) ≈ √1,638 ≈ 40.5
+        - Days: √252 ≈ 15.87
         """
         # Ensure we're working with the right shape
         predictions = predictions.squeeze()
         targets = targets.squeeze()
-        
+
         if len(predictions) < 5:
             return 0.0
-        
+
+        # Define annualization factors for different frequencies
+        trading_days = 252
+        trading_hours = 6.5
+        annualization_factors = {
+            '1min': np.sqrt(trading_days * trading_hours * 60),    # ~313.5
+            '5min': np.sqrt(trading_days * trading_hours * 12),    # ~140.2
+            '15min': np.sqrt(trading_days * trading_hours * 4),    # ~80.9
+            'hour': np.sqrt(trading_days * trading_hours),         # ~40.5
+            'day': np.sqrt(trading_days),                         # ~15.87
+        }
+
+        if freq not in annualization_factors:
+            raise ValueError(
+                f"Unsupported frequency: {freq}. Use '1min', '5min', '15min', 'hour', or 'day'")
+
+        annualization_factor = annualization_factors[freq]
+
         # Get top 5 predictions and their actual returns
         _, top_indices = torch.topk(predictions, 5)
         top_returns = targets[top_indices]
-        
+
         # Calculate mean return and standard deviation
         mean_return = top_returns.mean().item()
         std_return = top_returns.std().item()
-        
-        # Calculate Sharpe ratio (assuming Rf = 0)
+
+        # Annualize returns and volatility
+        annual_return = mean_return * annualization_factor
+        annual_std = std_return * annualization_factor
+
+        # If no risk-free rate provided, calculate excess returns (Rf = 0)
+        rf_rate = 0.0 if annual_rf_rate is None else annual_rf_rate
+
+        # Calculate Sharpe ratio
         # If std is 0, return 0 to avoid division by zero
-        return mean_return / std_return if std_return != 0 else 0.0
+        return (annual_return - rf_rate) / annual_std if annual_std != 0 else 0.0
 
     def _collect_step_outputs(self, outputs_dict: Dict[str, List], step_output: Dict) -> Dict[str, List]:
         """Collect step outputs for epoch-end processing."""

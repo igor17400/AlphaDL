@@ -107,7 +107,7 @@ class StocksDataFrame(Dataset):
 
     def __len__(self):
         """Returns the number of valid prediction points in the dataset."""
-        return sum(self.data["pred_idx"])
+        return len(self.data["dates"]) - self.sequence_length
 
     def __getitem__(self, idx):
         """Returns a batch of data in StockMixer format.
@@ -121,63 +121,48 @@ class StocksDataFrame(Dataset):
                 - dates_timestamp: timestamps for the sequence
         """
         if not self.batch_ticker_processing:
-            raise NotImplementedError("Only batch_ticker_processing=True is supported")
+            raise NotImplementedError(
+                "Only batch_ticker_processing=True is supported")
 
-        # print(f"########## idx:{idx} ##########")
-        # print("self.data")
-        # print(self.data)
-
-        # Find indices where pred_idx is True
-        pred_indices = np.where(self.data["pred_idx"])[0]
-        # print("pred_indices")
-        # print(pred_indices)
-        current_pred_idx = pred_indices[idx]
-        # print("current_pred_idx")
-        # print(current_pred_idx)
-
-        # Get sequence window for all stocks
-        sequence_start = current_pred_idx - self.sequence_length + 1
-        sequence_end = current_pred_idx + 1
+        # We want to predict the current idx after all the sequence_length days
+        current_pred_idx = idx + self.sequence_length
 
         # Extract features (excluding returns) and returns separately
         features = self.data["features"][
-            :, sequence_start:sequence_end, :-1
-        ]  # All features except returns
-        # print("features")
-        # print(features)
+            :, idx:current_pred_idx, :-1
+        ]  # All features except returns for all days in the sequence_length except for CURRENT DATE
+        # Remember that lst[x:y] is not inclusive. That is, a = [0, 1, 2, 3, 4] | a[2:4] = [2, 3] | a[4] = 4
 
-        returns = self.data["features"][
-            :, sequence_start:sequence_end, -1
-        ]  # Returns only
-        # print("returns")
-        # print(returns)
+        ground_truth = self.data["features"][
+            :, current_pred_idx, -1
+        ]  # Last feature column is returns values for CURRENT DATE
 
-        dates = self.data["dates"][sequence_start:sequence_end]
-        # print("dates")
-        # print(dates)
+        features_dates = self.data["dates"][idx:current_pred_idx] # all days in the sequence_length except for CURRENT DATE
+        current_date = self.data["dates"][current_pred_idx]
 
         # Get current prices (last timestep of sequence)
-        prices = features[:, -1, -1]  # Last timestep, close price
-        # print("prices")
-        # print(prices)
-
-        # Get ground truth (return at the prediction point)
-        ground_truth = returns[:, -1]  # Last timestep's return
+        prices = self.data["features"][
+            :, current_pred_idx, -2
+        ]  # Last timestep, close price for CURRENT DATE
 
         # Convert dates to timestamps
-        dates_timestamp = dates.astype(np.int64) // 10**9
+        dates_timestamp = features_dates.astype(np.int64) // 10**9
+        current_date = current_date.astype(np.int64) // 10**9
 
         return (
-            torch.tensor(features, dtype=torch.float32),  # [n_stocks, seq_len, features]
-            torch.tensor(prices, dtype=torch.float32).unsqueeze(1),  # [n_stocks, 1]
-            torch.tensor(ground_truth, dtype=torch.float32).unsqueeze(1),  # [n_stocks, 1]
+            # [n_stocks, seq_len, features]
+            torch.tensor(features, dtype=torch.float32),
+            torch.tensor(prices, dtype=torch.float32),  # [n_stocks]
+            torch.tensor(ground_truth, dtype=torch.float32),  # [n_stocks]
             dates_timestamp,
+            current_date
         )
 
     def download_data(self):
         """Downloads raw data from OpenBB or loads it from cache if available."""
         # Define cache paths
-        cache_dir = os.path.join(self.cache_dir, self.market, self.interval, self.index)
+        cache_dir = os.path.join(
+            self.cache_dir, self.market, self.interval, self.index)
         all_file = os.path.join(cache_dir, "ALL.csv")
 
         if self.use_cache and os.path.exists(all_file):
@@ -230,7 +215,8 @@ class StocksDataFrame(Dataset):
                     valid_tickers.append(ticker)
 
             features_array = np.stack(features_list)
-            dates_array = dates_list[0]  # All dates should be the same for all tickers
+            # All dates should be the same for all tickers
+            dates_array = dates_list[0]
 
             # Calculate returns
             close_prices = features_array[..., -1]
@@ -240,7 +226,8 @@ class StocksDataFrame(Dataset):
             ) / close_prices[..., :-1]
 
             # Add returns as a new feature
-            features_array = np.dstack([features_array, returns[..., np.newaxis]])
+            features_array = np.dstack(
+                [features_array, returns[..., np.newaxis]])
 
             all_data_dict = {
                 "features": features_array,
@@ -279,30 +266,19 @@ class StocksDataFrame(Dataset):
         # Create relevant_idx that includes lookback window
         relevant_idx = (dates >= relevant_start) & (dates <= end_date)
 
-        # Set prediction points (only after the lookback window)
-        pred_idx[(dates >= start_date) & (dates <= end_date)] = True
-
         # Log the counts for verification
         logger.info(f"Sequence length: {self.sequence_length}")
         logger.info(f"Number of elements in relevant_idx: {sum(relevant_idx)}")
-        logger.info(
-            f"Number of prediction points (pred_idx): {sum(pred_idx[relevant_idx])}"
-        )
-        logger.info(
-            f"Expected total: prediction points + sequence_length = {sum(pred_idx[relevant_idx]) + self.sequence_length}"
-        )
 
         # Filter the data
         all_data_dict["features"] = all_data_dict["features"][:, relevant_idx]
         all_data_dict["dates"] = all_data_dict["dates"][relevant_idx]
-        all_data_dict["pred_idx"] = pred_idx[relevant_idx]
 
         logger.info(
             f"Dataset split created with sequence_length={self.sequence_length}"
         )
         logger.info(
-            f"Total timesteps: {len(all_data_dict['dates'])}, "
-            f"Prediction timesteps: {sum(all_data_dict['pred_idx'])}"
+            f"Total timesteps: {len(all_data_dict['dates'])}"
         )
         logger.info(
             f"Date range: from {all_data_dict['dates'][0]} to {all_data_dict['dates'][-1]}"
@@ -313,18 +289,21 @@ class StocksDataFrame(Dataset):
     def _fetch_data(self):
         """Fetches stock data from OpenBB API."""
         # Fetch the list of constituents for the specified index
-        constituents = obb.index.constituents(symbol=self.index, provider=self.provider)
+        constituents = obb.index.constituents(
+            symbol=self.index, provider=self.provider)
         tickers = constituents["symbol"].tolist()
 
         # If selected_tickers is provided, filter the tickers list
         if self.selected_tickers:
-            tickers = [ticker for ticker in tickers if ticker in self.selected_tickers]
+            tickers = [
+                ticker for ticker in tickers if ticker in self.selected_tickers]
 
         # Initialize an empty DataFrame to store the fetched data
         all_data = pd.DataFrame()
 
         # Set the overall start and end dates from scraping_date
-        overall_start_date = datetime.strptime(self.scraping_date[0], "%Y-%m-%d")
+        overall_start_date = datetime.strptime(
+            self.scraping_date[0], "%Y-%m-%d")
         overall_end_date = datetime.strptime(self.scraping_date[1], "%Y-%m-%d")
 
         # Verify that we have enough historical data for the training start
@@ -354,7 +333,8 @@ class StocksDataFrame(Dataset):
                 start_str = current_start_date.strftime("%Y-%m-%d")
                 end_str = current_end_date.strftime("%Y-%m-%d")
 
-                logger.info(f"Fetching data for {ticker} from {start_str} to {end_str}")
+                logger.info(
+                    f"Fetching data for {ticker} from {start_str} to {end_str}")
 
                 try:
                     data_chunk = obb.equity.price.historical(
@@ -376,7 +356,8 @@ class StocksDataFrame(Dataset):
                 api_call_count += 1
 
                 if api_call_count >= api_call_limit:
-                    logger.info("API call limit reached, waiting for 60 seconds...")
+                    logger.info(
+                        "API call limit reached, waiting for 60 seconds...")
                     time.sleep(60)
                     api_call_count = 0
 
