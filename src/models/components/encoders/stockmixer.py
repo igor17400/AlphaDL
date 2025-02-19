@@ -188,4 +188,4 @@ class StockMixer(nn.Module):
         y = self.time_fc(y).squeeze(-1)  # [n_stocks]
         z = self.time_fc_(z).squeeze(-1)  # [n_stocks]
 
-        return (y + z).unsqueeze(-1)  # [n_stocks, 1]
+        return y + z  # Remove .unsqueeze(-1) to match original implementation

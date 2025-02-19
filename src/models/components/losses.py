@@ -34,21 +34,24 @@ class StockMixerLoss(nn.Module):
 
     def forward(
         self,
-        predicted_returns: torch.Tensor,  # Tensor shape: [num_stocks, 1]
-        ground_truth: torch.Tensor,  # Tensor shape: [num_stocks, 1]
-        mask: torch.Tensor = None,  # Optional tensor mask of shape [num_stocks, 1]
+        predictions: torch.Tensor,  # Raw price predictions
+        ground_truth: torch.Tensor,  # Target returns
+        base_price: torch.Tensor,  # Base prices for return calculation
+        mask: torch.Tensor = None,
     ) -> tuple:
         """
         Computes the combined loss for stock prediction.
 
         Steps:
-        1. Compute the **Mean Squared Error (MSE)** between predicted and actual returns.
-        2. Compute the **Pairwise Ranking Loss** to enforce correct ranking.
-        3. Combine both losses using the weight `alpha`.
+        1. Convert predictions to returns like the original implementation.
+        2. Compute the **Mean Squared Error (MSE)** between predicted and actual returns.
+        3. Compute the **Pairwise Ranking Loss** to enforce correct ranking.
+        4. Combine both losses using the weight `alpha`.
 
         Args:
-            predicted_returns (torch.Tensor): The predicted stock returns.
+            predictions (torch.Tensor): The raw price predictions.
             ground_truth (torch.Tensor): The actual observed stock returns.
+            base_price (torch.Tensor): The base prices for return calculation.
             mask (torch.Tensor, optional): A binary mask indicating valid stocks (1) and invalid stocks (0).
 
         Returns:
@@ -57,18 +60,10 @@ class StockMixerLoss(nn.Module):
                 - reg_loss: MSE loss component.
                 - rank_loss: Ranking loss component.
         """
-        num_stocks = predicted_returns.shape[0]
-        device = predicted_returns.device
-
-        # Step 1: Handle Optional Masking
-        if mask is not None:
-            valid_indices = mask.squeeze() > 0  # Convert mask to a boolean filter
-            predicted_returns = predicted_returns[valid_indices]
-            ground_truth = ground_truth[valid_indices]
-        else:
-            mask = torch.ones_like(predicted_returns)  # If no mask is provided, treat all stocks as valid
-
-        # Step 2: Compute **Mean Squared Error (MSE) Loss**
+        # Convert predictions to returns like the original implementation
+        predicted_returns = torch.div(torch.sub(predictions, base_price), base_price)
+        
+        # Calculate losses using the converted returns
         reg_loss = F.mse_loss(predicted_returns * mask, ground_truth * mask)
 
         # Step 3: Compute **Pairwise Ranking Loss**

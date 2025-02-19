@@ -131,31 +131,22 @@ class StockMixerModule(AbstractForecast):
         """
         data_batch, price_batch, ground_truth_batch, dates_batch, current_date = batch
 
-        # Forward pass to predict close prices for current date
-        prediction = self.forward(data_batch.squeeze(0))
+        # Get raw price predictions
+        predictions = self.forward(data_batch)
 
-        # Reshape tensors to [n_stocks, 1]
-        # Predicted close prices for current date
-        prediction = prediction.view(-1, 1)
-        # Actual returns for current date
-        ground_truth_batch = ground_truth_batch.view(-1, 1)
-        price_batch = price_batch.view(-1, 1)  # Current date's close prices
-
-        # Convert predicted prices to returns
-        predicted_returns = torch.div(
-            torch.sub(prediction, price_batch), price_batch)
-
-        # Calculate losses using the loss module
+        # Calculate loss using the StockMixerLoss
         loss, reg_loss, rank_loss = self.criterion(
-            predicted_returns=predicted_returns,
+            predictions=predictions,
             ground_truth=ground_truth_batch,
+            base_price=price_batch,
+            mask=torch.ones_like(ground_truth_batch)  # Add proper masking if needed
         )
 
         return {
             "loss": loss,
             "reg_loss": reg_loss,
             "rank_loss": rank_loss,
-            "predictions": predicted_returns,
+            "predictions": predictions,
             "targets": ground_truth_batch,
         }
 

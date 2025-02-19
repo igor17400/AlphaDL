@@ -221,9 +221,8 @@ class StocksDataFrame(Dataset):
             # Calculate returns
             close_prices = features_array[..., -1]
             returns = np.zeros_like(close_prices)
-            returns[..., 1:] = (
-                close_prices[..., 1:] - close_prices[..., :-1]
-            ) / close_prices[..., :-1]
+            for i in range(1, close_prices.shape[1]):
+                returns[..., i] = (close_prices[..., i] - close_prices[..., i-1]) / close_prices[..., i-1]
 
             # Add returns as a new feature
             features_array = np.dstack(
